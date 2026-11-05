@@ -1,0 +1,34 @@
+package universidade_ontology
+
+// Declaração de enumeração para status
+enum StatusMatricula {
+    Ativo01, Trancado02, Concluido03
+}
+
+// Declaração de Datatype personalizado
+datatype EnderecoDataType {
+    rua : string
+    numero : number
+    cidade : string
+}
+
+// Classe base kind
+kind Pessoa {
+    nome : string
+    idade : number
+    ativo : boolean
+}
+
+// Subkind especializado usando 'specializes'
+subkind Estudante specializes Pessoa {
+    ra : string
+    curso : string
+}
+
+// Outro tipo de classe ontológica
+role Professor {
+    departamento : string
+}
+
+// Generalization Set
+genset CategoriaPessoa
