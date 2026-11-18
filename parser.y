@@ -1,57 +1,16 @@
 %{
 #include <iostream>
 #include <string>
-#include <unordered_map>
-#include <vector>
-#include <iomanip>
 #include <cstdlib>
 #include <cstring>
+#include "compiler_context.h"
 
 using namespace std;
 
 extern int yylex();
-extern int linha_atual;
-extern int coluna_atual;
-extern FILE* yyin;
 
-string contexto_atual = "inicializacao";
-
-// Contadores para a Tabela de Síntese
-int quantidade_pacotes = 0;
-int quantidade_classes = 0;
-int quantidade_relacoes = 0;
-int quantidade_enum = 0;
-int quantidade_dataypes = 0;
-int quantidade_gensets = 0;
-
-// Requisito 2: Tabela de Dispersão (Symbol Table)
-unordered_map<string, string> tabela_de_simbolos;
-
-void inserir_simbolo(const string& nome, const string& categoria) {
-    tabela_de_simbolos[nome] = categoria;
-}
-
-// Requisito 5b: Relatório de erros da ontologia com sugestões
 void yyerror(const char *s) {
-    cerr << "\n❌ Erro Sintático na Linha " << linha_atual << ", Coluna " << coluna_atual 
-         << " [Contexto: " << contexto_atual << "]" << endl;
-    cerr << "   Detalhe técnico: " << s << endl;
-
-    if (contexto_atual == "pacote") {
-        cerr << "   💡 Sugestão: A ontologia TONTO deve iniciar com a declaração de um pacote (ex: package meu_pacote)." << endl;
-    } 
-    else if (contexto_atual == "classe") {
-        cerr << "   💡 Sugestão: Verifique se a classe possui um estereótipo válido seguido de um nome com inicial maiúscula e chaves '{ }'." << endl;
-    } 
-    else if (contexto_atual == "datatype") {
-        cerr << "   💡 Sugestão: Blocos 'datatype' requerem um nome válido e atributos tipados no formato 'nome : tipo'." << endl;
-    }
-    else if (contexto_atual == "enum") {
-        cerr << "   💡 Sugestão: Enumerações exigem 'enum Nome { Instancia1, Instancia2 }'." << endl;
-    }
-    else {
-        cerr << "   💡 Sugestão: Reveja a sintaxe deste bloco no manual EBNF da linguagem TONTO." << endl;
-    }
+    contexto_compilador.reportar_erro_sintatico(s);
 }
 %}
 
@@ -59,39 +18,42 @@ void yyerror(const char *s) {
     char* sval;
 }
 
-%token TOKEN_PACKAGE TOKEN_IMPORT TOKEN_ENUM TOKEN_DATATYPE TOKEN_GENSET TOKEN_SPECIALIZES
-%token TOKEN_NATIVE_TYPE TOKEN_STEREOTYPE_CLASS TOKEN_STEREOTYPE_RELATION TOKEN_META_ATTRIBUTE
-%token TOKEN_SPECIAL_SYMBOL TOKEN_INT_NUMBER
+%token TOKEN_PACKAGE TOKEN_IMPORT TOKEN_ENUM TOKEN_DATATYPE TOKEN_GENSET TOKEN_SPECIALIZES TOKEN_RELATION
+%token TOKEN_WHERE TOKEN_GENERAL TOKEN_SPECIFICS TOKEN_NATIVE_TYPE TOKEN_STEREOTYPE_CLASS
+%token TOKEN_STEREOTYPE_RELATION TOKEN_META_ATTRIBUTE TOKEN_AGGREGATION_SYMBOL TOKEN_ASSOCIATION_SYMBOL TOKEN_COMPOSITION_SYMBOL
+%token TOKEN_RANGE TOKEN_NUMBER TOKEN_DISJOINT TOKEN_OVERLAPPING TOKEN_COMPLETE TOKEN_INCOMPLETE
 
-%token <sval> TOKEN_CLASS_NAME
-%token <sval> TOKEN_NAME          
-%token <sval> TOKEN_INSTANCE_NAME
-%token <sval> TOKEN_NEW_TYPE
+%token <sval> TOKEN_NEW_TYPE TOKEN_INSTANCE_NAME TOKEN_CLASS_NAME TOKEN_NAME
+
+%type <sval> nome_pacote tipo_atributo
 
 %%
 
 programa:
-    { contexto_atual = "pacote"; }
-    declaracao_pacote 
-    { contexto_atual = "corpo_ontologia"; }
-    lista_elementos
+    declaracao_pacote lista_elementos
     {
         cout << "\n✅ Análise sintática e construção da tabela de símbolos concluídas com sucesso!" << endl;
     }
 ;
 
 declaracao_pacote:
-    TOKEN_PACKAGE TOKEN_NAME
+    TOKEN_PACKAGE nome_pacote
     {
-        quantidade_pacotes++;
-        inserir_simbolo($2, "Pacote Ontológico");
+        contexto_compilador.set_contexto("pacote");
+        contexto_compilador.get_tabela().registrar_pacote($2, false);
         free($2);
     }
-    | TOKEN_IMPORT TOKEN_NAME
+    | TOKEN_IMPORT nome_pacote
     {
-        inserir_simbolo($2, "Importação de Pacote");
+        contexto_compilador.set_contexto("pacote");
+        contexto_compilador.get_tabela().registrar_pacote($2, true);
         free($2);
     }
+;
+
+nome_pacote:
+    TOKEN_NAME { $$ = $1; }
+    | TOKEN_CLASS_NAME { $$ = $1; }
 ;
 
 lista_elementos:
@@ -109,27 +71,122 @@ elemento:
 ;
 
 regra_classe:
-    { contexto_atual = "classe"; }
     TOKEN_STEREOTYPE_CLASS TOKEN_CLASS_NAME
     {
-        quantidade_classes++;
-        inserir_simbolo($3, "Classe Ontológica (Simples)");
+        contexto_compilador.set_contexto("classe");
+        contexto_compilador.get_tabela().iniciar_classe($2, "Classe Ontológica (Simples)");
+        contexto_compilador.get_tabela().finalizar_classe();
+        free($2);
+    }
+    | TOKEN_STEREOTYPE_CLASS TOKEN_CLASS_NAME '{'
+      {
+          contexto_compilador.set_contexto("classe");
+          contexto_compilador.get_tabela().iniciar_classe($2, "Classe Ontológica (com Escopo)");
+      }
+      corpo_classe_opt '}'
+      {
+          contexto_compilador.get_tabela().finalizar_classe();
+          free($2);
+      }
+    | TOKEN_STEREOTYPE_CLASS TOKEN_CLASS_NAME TOKEN_SPECIALIZES lista_classes_mae
+    {
+        contexto_compilador.set_contexto("classe");
+        contexto_compilador.get_tabela().iniciar_classe($2, "Classe Ontológica (Especializada)");
+        contexto_compilador.get_tabela().finalizar_classe();
+        free($2);
+    }
+    | TOKEN_STEREOTYPE_CLASS TOKEN_CLASS_NAME TOKEN_SPECIALIZES lista_classes_mae '{'
+      {
+          contexto_compilador.set_contexto("classe");
+          contexto_compilador.get_tabela().iniciar_classe($2, "Classe Ontológica (Especializada com Escopo)");
+      }
+      corpo_classe_opt '}'
+      {
+          contexto_compilador.get_tabela().finalizar_classe();
+          free($2);
+      }
+;
+
+lista_classes_mae:
+    lista_classes_mae ',' TOKEN_CLASS_NAME { free($3); }
+    | TOKEN_CLASS_NAME { free($1); }
+;
+
+corpo_classe_opt:
+    corpo_classe_opt item_classe
+    | /* vazio */
+;
+
+item_classe:
+    atributo
+    | relacao_interna
+;
+
+atributo:
+    TOKEN_NAME ':' tipo_atributo cardinalidade_opt meta_atributos_opt
+    {
+        contexto_compilador.set_contexto("atributo");
+        contexto_compilador.get_tabela().registrar_atributo($1, "Atributo Interno");
+        free($1);
         free($3);
     }
-    | { contexto_atual = "classe"; }
-      TOKEN_STEREOTYPE_CLASS TOKEN_CLASS_NAME '{' atributos_opt '}'
+;
+
+tipo_atributo:
+    TOKEN_NATIVE_TYPE { $$ = strdup("nativo"); }
+    | TOKEN_CLASS_NAME { $$ = $1; }
+    | TOKEN_NEW_TYPE { $$ = $1; }
+    | TOKEN_NAME { $$ = $1; }
+;
+
+meta_atributos_opt:
+    '{' lista_meta '}'
+    | /* vazio */
+;
+
+lista_meta:
+    lista_meta TOKEN_META_ATTRIBUTE
+    | TOKEN_META_ATTRIBUTE
+;
+
+regra_enum:
+    TOKEN_ENUM TOKEN_CLASS_NAME '{' lista_instancias '}'
     {
-        quantidade_classes++;
-        inserir_simbolo($3, "Classe Ontológica (com Atributos)");
-        free($3);
+        contexto_compilador.set_contexto("enum");
+        contexto_compilador.get_tabela().registrar_enum($2);
+        free($2);
     }
-    | { contexto_atual = "classe"; }
-      TOKEN_STEREOTYPE_CLASS TOKEN_CLASS_NAME TOKEN_SPECIALIZES TOKEN_CLASS_NAME
+;
+
+lista_instancias:
+    lista_instancias ',' nome_instancia
+    | nome_instancia
+;
+
+nome_instancia:
+    TOKEN_INSTANCE_NAME { free($1); }
+    | TOKEN_CLASS_NAME { free($1); }
+    | TOKEN_NAME { free($1); }
+;
+
+regra_datatype:
+    TOKEN_DATATYPE TOKEN_NEW_TYPE '{' atributos_opt '}'
     {
-        quantidade_classes++;
-        inserir_simbolo($3, "Classe Ontológica (Especializada)");
-        free($3);
-        free($5); 
+        contexto_compilador.set_contexto("datatype");
+        contexto_compilador.get_tabela().registrar_datatype($2);
+        free($2);
+    }
+    | TOKEN_DATATYPE TOKEN_CLASS_NAME '{' atributos_opt '}'
+    {
+        contexto_compilador.set_contexto("datatype");
+        contexto_compilador.get_tabela().registrar_datatype($2);
+        free($2);
+    }
+    | TOKEN_DATATYPE TOKEN_NAME '{' atributos_opt '}'
+    {
+        contexto_compilador.set_contexto("datatype");
+        contexto_compilador.get_tabela().registrar_datatype($2);
+        free($2);
     }
 ;
 
@@ -138,111 +195,136 @@ atributos_opt:
     | /* vazio */
 ;
 
-atributo:
-    TOKEN_NAME ':' TOKEN_NATIVE_TYPE
-    {
-        quantidade_relacoes++;
-        inserir_simbolo($1, "Atributo Interno");
-        free($1);
-    }
-    | TOKEN_NAME ':' TOKEN_CLASS_NAME
-    {
-        quantidade_relacoes++;
-        inserir_simbolo($1, "Associação de Classe");
-        free($1);
-        free($3);
-    }
-;
-
-regra_enum:
-    { contexto_atual = "enum"; }
-    TOKEN_ENUM TOKEN_CLASS_NAME '{' lista_instancias '}'
-    {
-        quantidade_enum++;
-        inserir_simbolo($3, "Enumeração");
-        free($3);
-    }
-;
-
-lista_instancias:
-    TOKEN_INSTANCE_NAME { free($1); }
-    | TOKEN_CLASS_NAME { free($1); }
-    | lista_instancias ',' TOKEN_INSTANCE_NAME { free($3); }
-    | lista_instancias ',' TOKEN_CLASS_NAME { free($3); }
-;
-
-regra_datatype:
-    { contexto_atual = "datatype"; }
-    TOKEN_DATATYPE TOKEN_CLASS_NAME '{' atributos_opt '}'
-    {
-        quantidade_dataypes++;
-        inserir_simbolo($3, "DataType Complexo");
-        free($3);
-    }
-;
-
 regra_genset:
-    { contexto_atual = "genset"; }
-    TOKEN_GENSET TOKEN_CLASS_NAME
+    genset_declaracao
+;
+
+genset_declaracao:
+    TOKEN_GENSET TOKEN_CLASS_NAME '{' TOKEN_GENERAL TOKEN_CLASS_NAME TOKEN_SPECIFICS classes_especializadas '}'
     {
-        quantidade_gensets++;
-        inserir_simbolo($3, "Generalization Set");
+        contexto_compilador.set_contexto("genset");
+        contexto_compilador.get_tabela().registrar_genset($2, $5);
+        free($2);
+        free($5);
+    }
+    | TOKEN_GENSET '{' TOKEN_GENERAL TOKEN_CLASS_NAME TOKEN_SPECIFICS classes_especializadas '}'
+    {
+        contexto_compilador.set_contexto("genset");
+        contexto_compilador.get_tabela().registrar_genset("GensetBloco", $4);
+        free($4);
+    }
+    | genset_restricao TOKEN_CLASS_NAME TOKEN_WHERE classes_especializadas TOKEN_SPECIALIZES TOKEN_CLASS_NAME
+    {
+        contexto_compilador.set_contexto("genset");
+        contexto_compilador.get_tabela().registrar_genset($2, $6);
+        free($2);
+        free($6);
+    }
+    | genset_restricao TOKEN_NAME TOKEN_WHERE classes_especializadas TOKEN_SPECIALIZES TOKEN_CLASS_NAME
+    {
+        contexto_compilador.set_contexto("genset");
+        contexto_compilador.get_tabela().registrar_genset($2, $6);
+        free($2);
+        free($6);
+    }
+;
+
+genset_restricao:
+    TOKEN_DISJOINT genset_completude 
+    | TOKEN_OVERLAPPING genset_completude
+    | genset_completude
+;
+
+genset_completude:
+    TOKEN_COMPLETE TOKEN_GENSET
+    | TOKEN_INCOMPLETE TOKEN_GENSET
+    | TOKEN_GENSET
+;
+
+classes_especializadas:
+    classes_especializadas ',' TOKEN_CLASS_NAME 
+    {
         free($3);
+    }
+    | TOKEN_CLASS_NAME
+    {
+        free($1);
+    }
+;
+
+relacao_interna:
+    '@' TOKEN_STEREOTYPE_RELATION cardinalidade_opt simbolo_relacao cardinalidade_opt TOKEN_CLASS_NAME
+    {
+        contexto_compilador.set_contexto("relacao");
+        contexto_compilador.get_tabela().registrar_relacao_interna($6);
+        free($6);
+    }
+    | '@' TOKEN_STEREOTYPE_RELATION cardinalidade_opt simbolo_relacao TOKEN_NAME simbolo_relacao cardinalidade_opt TOKEN_CLASS_NAME
+    {
+        contexto_compilador.set_contexto("relacao");
+        contexto_compilador.get_tabela().registrar_relacao_interna($8);
+        free($5);
+        free($8);
     }
 ;
 
 relacao_externa:
-    '@' TOKEN_STEREOTYPE_RELATION TOKEN_NAME TOKEN_CLASS_NAME
+    '@' TOKEN_STEREOTYPE_RELATION TOKEN_RELATION relacao_classes
     {
-        quantidade_relacoes++;
-        inserir_simbolo($3, "Relação Externa");
-        free($3);
-        free($4);
+        contexto_compilador.set_contexto("relacao");
     }
+    | '@' TOKEN_STEREOTYPE_RELATION TOKEN_NAME relacao_classes
+    {
+        contexto_compilador.set_contexto("relacao");
+    }
+;
+
+relacao_classes:
+    TOKEN_CLASS_NAME cardinalidade_opt simbolo_relacao cardinalidade_opt TOKEN_CLASS_NAME
+    {
+        contexto_compilador.get_tabela().registrar_relacao_externa($1, $5);
+        free($1);
+        free($5);
+    }
+    | TOKEN_CLASS_NAME cardinalidade_opt simbolo_relacao TOKEN_NAME simbolo_relacao cardinalidade_opt TOKEN_CLASS_NAME
+    {
+        contexto_compilador.get_tabela().registrar_relacao_externa($1, $7, $4);
+        free($1);
+        free($4);
+        free($7);
+    }
+;
+
+cardinalidade_opt:
+    '[' TOKEN_NUMBER ']'
+    | '[' TOKEN_NUMBER TOKEN_RANGE '*' ']'
+    | '[' '*' TOKEN_RANGE TOKEN_NUMBER ']'
+    | '[' TOKEN_NUMBER TOKEN_RANGE TOKEN_NUMBER ']'
+    | '[' '*' TOKEN_RANGE '*' ']'
+    | '[' '*' ']'
+    | '[' ']'
+    | /* vazio */
+;
+
+simbolo_relacao:
+    TOKEN_AGGREGATION_SYMBOL
+    | TOKEN_ASSOCIATION_SYMBOL
+    | TOKEN_COMPOSITION_SYMBOL
 ;
 
 %%
 
 int main(int argc, char** argv) {
     if (argc > 1) {
-        FILE* ficheiro = fopen(argv[1], "r");
-        if (!ficheiro) {
-            cerr << "❌ Erro: Não foi possível abrir o ficheiro '" << argv[1] << "'" << endl;
-            return 1;
+        for (int i = 1; i < argc; ++i) {
+            contexto_compilador.processar_arquivo(argv[i]);
         }
-        yyin = ficheiro;
-        cout << "📂 A analisar o ficheiro: " << argv[1] << "\n" << endl;
     } else {
-        cout << "⌨️  Modo interativo ativado. Digite a ontologia TONTO (Ctrl+D para terminar):" << endl;
-        yyin = stdin;
+        contexto_compilador.processar_entrada_padrao();
     }
 
-    yyparse();
-
-    // Requisito 2 & 5a: Relatório 1 - Tabela de Dispersão (Symbol Table)
-    cout << "\n=================================================================" << endl;
-    cout << "          TABELA DE DISPERSÃO (TABELA DE SÍMBOLOS - HASH)        " << endl;
-    cout << "=================================================================" << endl;
-    cout << left << setw(35) << "IDENTIFICADOR (CHAVE)" << " | " << "CATEGORIA / ESTEREÓTIPO" << endl;
-    cout << "-----------------------------------------------------------------" << endl;
-    for (const auto& par : tabela_de_simbolos) {
-        cout << left << setw(35) << par.first << " | " << par.second << endl;
-    }
-    cout << "=================================================================" << endl;
-
-    // Requisito 5a: Relatório 2 - Tabela de Síntese dos Construtos
-    cout << "\n=================================================================" << endl;
-    cout << "                 TABELA DE SÍNTESE DA ONTOLOGIA                  " << endl;
-    cout << "=================================================================" << endl;
-    cout << left << setw(40) << "CONCEITO / CONSTRUTO" << " | " << "QUANTIDADE" << endl;
-    cout << "-----------------------------------------------------------------" << endl;
-    cout << left << setw(40) << "Pacotes ontológicos" << " | " << quantidade_pacotes << endl;
-    cout << left << setw(40) << "Classes reconhecidas" << " | " << quantidade_classes << endl;
-    cout << left << setw(40) << "Relações e atributos" << " | " << quantidade_relacoes << endl;
-    cout << left << setw(40) << "Enumerações (enum)" << " | " << quantidade_enum << endl;
-    cout << left << setw(40) << "Tipos de dados (datatype)" << " | " << quantidade_dataypes << endl;
-    cout << left << setw(40) << "Generalization Sets (genset)" << " | " << quantidade_gensets << endl;
-    cout << "=================================================================" << endl;
+    contexto_compilador.get_tabela().imprimir_tabela_dispersao();
+    contexto_compilador.get_tabela().imprimir_tabela_sintese();
 
     return 0;
 }

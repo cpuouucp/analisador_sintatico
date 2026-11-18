@@ -1,34 +1,105 @@
-package universidade_ontology
+// 1. Declaração de Pacote e Importação
+package UniversidadeOntologia
+import TempoOntologia
 
-// Declaração de enumeração para status
-enum StatusMatricula {
-    Ativo01, Trancado02, Concluido03
+// 2. Classes Enumeradas (com instâncias terminadas em número conforme a regra léxica)
+enum CorOlhos {
+    Azul01, Verde02, Castanho03, Preto04
 }
 
-// Declaração de Datatype personalizado
+enum StatusMatricula {
+    Ativa01, Trancada02, Concluida03
+}
+
+// 3. Tipos de Dados Complexos (Datatypes)
 datatype EnderecoDataType {
     rua : string
-    numero : number
+    numero : int
     cidade : string
+    cep : string {const}
 }
 
-// Classe base kind
+datatype TelefoneDataType {
+    ddd : string
+    numero : string
+}
+
+// 4. Classes Base (Kind, Category, RoleMixin, Collective, Relator)
 kind Pessoa {
     nome : string
-    idade : number
-    ativo : boolean
+    idade : int
+    data_nascimento : date {const}
+    nomes_preferidos : string [1..*]
+    cor_olhos : CorOlhos
+    endereco : EnderecoDataType
+    telefone : TelefoneDataType
 }
 
-// Subkind especializado usando 'specializes'
-subkind Estudante specializes Pessoa {
-    ra : string
-    curso : string
+category Organizacao
+
+roleMixin Empregador
+
+kind Sala
+
+// 5. Classes Especializadas (Subkind, Phase, Role)
+subkind SalaDeAula specializes Sala
+
+phase Crianca specializes Pessoa
+phase Adolescente specializes Pessoa
+phase AdultoJovem specializes Pessoa
+
+role Empregado specializes Pessoa
+role ProfessorUniversitario specializes Empregado {
+    titulacao : string
 }
 
-// Outro tipo de classe ontológica
-role Professor {
-    departamento : string
+role EstudanteUniversitario specializes Pessoa {
+    matricula : string {const}
+    status : StatusMatricula
 }
 
-// Generalization Set
-genset CategoriaPessoa
+role EstudanteAtivo specializes EstudanteUniversitario
+role EstudanteEgresso specializes EstudanteUniversitario
+
+// 6. Generalizações (Generalization Sets - Formas em Linha, Bloco e Curta)
+disjoint complete genset FaixaEtariaPessoa where Crianca, Adolescente, AdultoJovem specializes Pessoa
+
+genset StatusEstudante {
+    general EstudanteUniversitario
+    specifics EstudanteAtivo, EstudanteEgresso
+}
+
+genset CategoriaOrganizacional
+
+// 7. Classes com Relações Internas e Cardinalidades
+kind Departamento {
+    nome_departamento : string
+}
+
+kind Universidade specializes Organizacao {
+    endereco : EnderecoDataType
+    @componentOf [1] <>-- [1..*] Departamento
+    @componentOf [1] <>-- [0..*] SalaDeAula
+}
+
+collective EquipeTecnica {
+    @memberOf [1] <o>-- [1..*] Empregado
+}
+
+subkind TecnicoJunior specializes EquipeTecnica
+subkind TecnicoSenior specializes EquipeTecnica
+
+// 8. Relatores e Relações Externas (Simples e Nomeadas)
+relator ContratoTrabalho {
+    data_inicio : date {const}
+}
+
+relator MatriculaAcademica {
+    semestre : string
+}
+
+@mediation relation ContratoTrabalho [1..*] -- [1] Empregado
+@mediation relation ContratoTrabalho [1..*] -- [1] Empregador
+@mediation relation MatriculaAcademica [1..*] -- [1] EstudanteUniversitario
+@mediation relation MatriculaAcademica [0..*] -- [1] Departamento
+@material relation Empregador [1] -- contrata -- [0..*] Empregado

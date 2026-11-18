@@ -14,6 +14,14 @@
         },
         {
             "type": "shell",
+            "label": "Compilar e Rodar Teste (Make Run)",
+            "command": "make run",
+            "group": "test",
+            "problemMatcher": ["$gcc"],
+            "detail": "Compila e executa o analisador com o arquivo exemplo.tonto."
+        },
+        {
+            "type": "shell",
             "label": "Limpar Projeto (Make Clean)",
             "command": "make clean",
             "group": "none",

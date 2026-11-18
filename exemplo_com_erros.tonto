@@ -1,0 +1,36 @@
+// 1. ERRO SINTÁTICO NO PACOTE: Nome do pacote ausente antes da enumeração
+package
+
+// 2. Bloco válido após recuperação (deve ser contabilizado normalmente)
+enum TurnoAula {
+    Matutino01, Vespertino02, Noturno03
+}
+
+// 3. ERRO SINTÁTICO NO DATATYPE: Falta o ':' entre o atributo e o tipo
+datatype EnderecoDataType {
+    logradouro string
+    numero : int
+}
+
+// 4. ERRO LÉXICO E SINTÁTICO NA CLASSE:
+//    - 'idade20' tem números misturados (Erro Léxico)
+//    - falta o tipo após ':' em 'matricula :' (Erro Sintático)
+kind Aluno {
+    nome : string
+    idade20 : int
+    matricula :
+}
+
+// 5. Classe válida (prova que o parser se recuperou do fechamento '}' anterior)
+subkind Bolsista specializes Aluno {
+    valor_bolsa : number
+}
+
+// 6. ERRO SINTÁTICO NO GENSET: Falta a palavra 'specializes' antes da superclasse
+disjoint complete genset TipoAluno where Bolsista Aluno
+
+// 7. ERRO SINTÁTICO NA RELAÇÃO EXTERNA: Falta o símbolo '--' entre as cardinalidades
+@mediation relation ContratoBolsa [1..*] [1] Bolsista
+
+// 8. Relação externa válida no final do arquivo
+@mediation relation ContratoBolsa [1..*] -- [1] Bolsista
